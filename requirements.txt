@@ -1,0 +1,10 @@
+google-adk
+langgraph
+langchain
+langchain-google-genai
+fastapi
+uvicorn
+streamlit
+python-dotenv
+pydantic
+requests
