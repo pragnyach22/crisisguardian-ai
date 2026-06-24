@@ -140,7 +140,7 @@ def delegate_crisis_tasks(event: dict) -> dict:
             "fire_stations": [{"name": "Metro Fire Station 4", "distance": "1.4 miles", "status": "Ready"}]
         }
 
-    # 4. RISK AGENT — derive from real data
+    # 4. RISK AGENT — derive from crisis type + weather, not location alone
     logger.info("Triggering Risk Agent node execution...")
     cond = str(weather_result.get("condition", "")).lower()
     wind_raw = str(weather_result.get("wind_speed", "0")).replace(" km/h", "")
@@ -150,12 +150,18 @@ def delegate_crisis_tasks(event: dict) -> dict:
         wind_val = 0.0
     crisis_type = event.get("crisis_type", "general")
 
-    if "cyclone" in cond or wind_val > 70 or crisis_type == "cyclone":
+    if crisis_type == "cyclone" and ("cyclone" in cond or wind_val >= 62):
         risk_level = "CRITICAL"
-    elif "rain" in cond or "flood" in cond or crisis_type == "flood":
+    elif crisis_type == "cyclone":
         risk_level = "HIGH"
+    elif crisis_type == "flood" and ("rain" in cond or "flood" in cond):
+        risk_level = "HIGH"
+    elif crisis_type == "flood":
+        risk_level = "MODERATE"
     elif crisis_type in ("earthquake", "fire"):
         risk_level = "HIGH"
+    elif crisis_type == "general":
+        risk_level = "LOW"
     else:
         risk_level = "MODERATE"
 
