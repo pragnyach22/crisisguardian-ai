@@ -2,10 +2,12 @@
 CrisisGuardian AI - Document Analyzer
 =====================================
 Enables parsing and summarizing disaster-related PDFs, emergency plans, and guides.
-Connects with LangChain document loaders and semantic query utilities.
+Connects with LangChain document loaders and semantic query via the backend API.
 """
 
+import os
 import streamlit as st
+import requests
 from utils import inject_custom_styles, render_sidebar_branding
 
 # Page Setup
@@ -18,6 +20,8 @@ st.set_page_config(
 inject_custom_styles()
 render_sidebar_branding()
 
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+
 st.markdown("<div class='page-title'>Document Analyzer</div>", unsafe_allow_html=True)
 st.markdown("<div class='page-subtitle'>Upload emergency policy manuals or threat guidebooks to generate summaries</div>", unsafe_allow_html=True)
 
@@ -25,12 +29,12 @@ st.markdown("<div class='page-subtitle'>Upload emergency policy manuals or threa
 with st.container():
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
     st.markdown("#### 📁 PDF Document Upload")
-    
+
     uploaded_file = st.file_uploader(
         "Upload disaster protocol, emergency plan, or weather report (PDF):",
         type=["pdf"]
     )
-    
+
     submit_analysis = st.button("📄 Analyze Document", use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -40,54 +44,55 @@ if submit_analysis:
         st.warning("Please upload a PDF document first before starting the analysis.")
     else:
         with st.spinner("Parsing document structure & extracting semantic warnings..."):
-            # =========================================================================
-            # LANGCHAIN DOCUMENT ANALYSIS CONNECTION POINT:
-            # Here, the PDF file bytes are read and processed by LangChain.
-            #
-            # Example backend implementation flow:
-            #   1. Save bytes to temporary directory.
-            #   2. Load via LangChain:
-            #      from langchain_community.document_loaders import PyPDFLoader
-            #      loader = PyPDFLoader(temp_path)
-            #      pages = loader.load()
-            #   3. Split texts:
-            #      from langchain_text_splitters import RecursiveCharacterTextSplitter
-            #      splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-            #      docs = splitter.split_documents(pages)
-            #   4. Embed and query via Gemini/VectorStore:
-            #      from langchain_google_genai import GoogleGenerativeAIEmbeddings
-            #      from langchain_community.vectorstores import FAISS
-            #      vector_store = FAISS.from_documents(docs, GoogleGenerativeAIEmbeddings())
-            #   5. Run a summarize or QA chain to answer: "What is the summary, what are the warnings, actions, and contacts?"
-            # =========================================================================
-            
-            # Simulated placeholder values
+            is_mock = False
+            backend_error = None
             doc_name = uploaded_file.name
-            summary = (
-                f"The document '{doc_name}' is identified as a Flood Evacuation Protocol for Urban Sectors. "
-                "It describes operational guidelines, flood level definitions (alert, warning, danger), "
-                "and routes to municipal community safe havens."
-            )
-            key_warnings = [
-                "Evacuate immediately when water rises above level tier 3 (2.5 meters).",
-                "Do not stay in subterranean garages or ground-floor rooms if structural integrity is compromised.",
-                "Turn off the power main before water levels reach electrical outlets."
-            ]
-            recommended_actions = [
-                "Establish neighborhood communication units prior to storm landing.",
-                "Collect non-perishable rations (minimum 72-hour supply per individual).",
-                "Mark out primary and secondary high-ground egress lines on district maps."
-            ]
-            contacts = [
-                "Municipal Disaster Management Desk: 1800-555-0100",
-                "First Responder Emergency Desk: 112 / 911",
-                "Regional Flood Rescue Command Unit: +1-555-0921"
-            ]
+            summary = ""
+            key_warnings = []
+            recommended_actions = []
+
+            try:
+                files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "application/pdf")}
+                response = requests.post(
+                    f"{BACKEND_URL}/document-analysis",
+                    files=files,
+                    timeout=60
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    summary = data.get("summary", "")
+                    key_warnings = data.get("warnings", [])
+                    recommended_actions = data.get("recommendations", [])
+                else:
+                    backend_error = f"Backend returned status {response.status_code}: {response.text}"
+                    raise Exception(backend_error)
+            except Exception as e:
+                backend_error = backend_error or str(e)
+                is_mock = True
+                summary = (
+                    f"The document '{doc_name}' is identified as a Flood Evacuation Protocol for Urban Sectors. "
+                    "It describes operational guidelines, flood level definitions (alert, warning, danger), "
+                    "and routes to municipal community safe havens."
+                )
+                key_warnings = [
+                    "Evacuate immediately when water rises above level tier 3 (2.5 meters).",
+                    "Do not stay in subterranean garages or ground-floor rooms if structural integrity is compromised.",
+                    "Turn off the power main before water levels reach electrical outlets."
+                ]
+                recommended_actions = [
+                    "Establish neighborhood communication units prior to storm landing.",
+                    "Collect non-perishable rations (minimum 72-hour supply per individual).",
+                    "Mark out primary and secondary high-ground egress lines on district maps."
+                ]
 
         st.success("Document analyzed successfully!")
-        
+        if is_mock:
+            st.info("Backend unavailable — showing local fallback analysis.")
+            if backend_error:
+                st.warning(f"Backend request error: {backend_error}")
+
         col_left, col_right = st.columns(2, gap="large")
-        
+
         with col_left:
             st.markdown("### 📋 EXECUTIVE SUMMARY")
             st.markdown(
@@ -99,13 +104,36 @@ if submit_analysis:
                 """,
                 unsafe_allow_html=True
             )
-            
-            st.markdown("### 📞 IMPORTANT CONTACTS")
-            st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-            for contact in contacts:
-                st.markdown(f"- **{contact}**")
-            st.markdown("</div>", unsafe_allow_html=True)
-            
+
+            if not is_mock:
+                st.markdown("### 💬 ASK ABOUT THIS DOCUMENT")
+                user_question = st.text_input(
+                    "Ask a question about the uploaded document:",
+                    placeholder="e.g. What evacuation routes are mentioned?"
+                )
+                if st.button("🔍 Query Document"):
+                    if user_question.strip():
+                        try:
+                            qa_response = requests.post(
+                                f"{BACKEND_URL}/document-query",
+                                json={"query": user_question},
+                                timeout=30
+                            )
+                            if qa_response.status_code == 200:
+                                answer = qa_response.json().get("answer", "No answer returned.")
+                                st.markdown(
+                                    f"""
+                                    <div class='glass-card'>
+                                        <p style='margin:0; font-size:0.95rem; line-height:1.5; color:#d1d5db;'>{answer}</p>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True
+                                )
+                            else:
+                                st.error(f"Query failed: {qa_response.text}")
+                        except Exception as e:
+                            st.error(f"Could not reach backend: {e}")
+
         with col_right:
             st.markdown("### ⚠️ WARNINGS & PRECAUTIONS")
             for warning in key_warnings:
@@ -117,7 +145,7 @@ if submit_analysis:
                     """,
                     unsafe_allow_html=True
                 )
-                
+
             st.markdown("### ⚡ REQUIRED PROCEDURES")
             for action in recommended_actions:
                 st.markdown(

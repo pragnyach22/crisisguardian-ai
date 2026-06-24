@@ -49,15 +49,26 @@ with st.spinner("Pinging endpoint servers..."):
         gemini_status = False
         gemini_msg = "Key Missing (Set GEMINI_API_KEY in .env)"
 
-    # Mocking database and MCP server state checks
-    mcp_status = True
-    mcp_msg = "Connected (3 MCP servers bound)"
-    
+    # System status from backend when available
+    mcp_status = False
+    mcp_msg = "Offline (backend unreachable)"
+    workflow_status = False
+    workflow_msg = "Offline (backend unreachable)"
+
+    if backend_online:
+        try:
+            sys_response = requests.get(f"{BACKEND_URL}/system-status", timeout=3)
+            if sys_response.status_code == 200:
+                sys_data = sys_response.json()
+                mcp_status = sys_data.get("mcp") == "connected"
+                mcp_msg = f"MCP: {sys_data.get('mcp', 'unknown')}"
+                workflow_status = sys_data.get("workflow") == "active"
+                workflow_msg = f"Workflow: {sys_data.get('workflow', 'unknown')}"
+        except Exception:
+            pass
+
     db_status = True
     db_msg = "Connected (Relief cache responsive)"
-    
-    workflow_status = True
-    workflow_msg = "StateGraph compiled and validated"
 
 # 2. Main Dashboard Cards
 st.markdown("### 🖥️ HEALTH CHECK DASHBOARD")

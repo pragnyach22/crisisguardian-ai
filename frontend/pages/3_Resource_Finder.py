@@ -45,34 +45,47 @@ if submit_search:
         st.warning("Please enter a valid location to run the locator.")
     else:
         with st.spinner(f"Resolving critical assets near {target_location}..."):
-            # =========================================================================
-            # RESOURCE AGENT API INTEGRATION POINT:
-            # Here, the client queries the FastAPI portal's resource lookup endpoint,
-            # which delegates to tools/resource_tool.py via the ResourceAgent.
-            #
-            # Example API Request:
-            #   response = requests.get(f"{BACKEND_URL}/api/resources?location={target_location}")
-            #   if response.status_code == 200:
-            #       resources = response.json()
-            # =========================================================================
-            
-            # Placeholder data representing database mappings
-            shelters = [
-                {"name": "District Cyclone Shelter Hall A", "address": "Bay Road, Visakhapatnam", "capacity": "450/600", "distance": "0.8 miles"},
-                {"name": "Govt Higher Secondary Safe Center", "address": "Station Road, Visakhapatnam", "capacity": "210/400", "distance": "1.5 miles"}
-            ]
-            
-            hospitals = [
-                {"name": "City Emergency Trauma Center", "address": "Main Boulevard, Visakhapatnam", "status": "Critical Load", "distance": "1.2 miles"},
-                {"name": "St. Mary Medical Ward", "address": "Park Avenue, Visakhapatnam", "status": "Available Beds", "distance": "2.4 miles"}
-            ]
-            
-            responders = [
-                {"station": "Coastal Fire Station Depot 4", "distance": "1.1 miles", "status": "Active Rescue Dispatch"},
-                {"police": "Visakhapatnam Central Police Division", "distance": "0.9 miles", "status": "Patrol & Escort Active"}
-            ]
+            is_mock = False
+            backend_error = None
+            shelters = []
+            hospitals = []
+            police_stations = []
+            fire_stations = []
+
+            try:
+                response = requests.post(
+                    f"{BACKEND_URL}/resources",
+                    json={"location": target_location},
+                    timeout=15
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    shelters = data.get("shelters", [])
+                    hospitals = data.get("hospitals", [])
+                    police_stations = data.get("police_stations", [])
+                    fire_stations = data.get("fire_stations", [])
+                else:
+                    backend_error = f"Backend returned status {response.status_code}"
+                    raise Exception(backend_error)
+            except Exception as e:
+                backend_error = backend_error or str(e)
+                is_mock = True
+                shelters = [
+                    {"name": "District Cyclone Shelter Hall A", "address": "Bay Road", "capacity": "450/600", "distance_miles": 0.8, "status": "Open"},
+                    {"name": "Govt Higher Secondary Safe Center", "address": "Station Road", "capacity": "210/400", "distance_miles": 1.5, "status": "Open"}
+                ]
+                hospitals = [
+                    {"name": "City Emergency Trauma Center", "address": "Main Boulevard", "status": "Critical Load", "distance_miles": 1.2},
+                    {"name": "St. Mary Medical Ward", "address": "Park Avenue", "status": "Available Beds", "distance_miles": 2.4}
+                ]
+                police_stations = [{"name": "Central Police Division", "distance_miles": 0.9, "status": "Patrol Active"}]
+                fire_stations = [{"name": "Coastal Fire Station Depot 4", "distance_miles": 1.1, "status": "Active Rescue Dispatch"}]
 
         st.success(f"Discovered resources matching area: '{target_location}'")
+        if is_mock:
+            st.info("Backend unavailable — showing local fallback data.")
+            if backend_error:
+                st.warning(f"Backend request error: {backend_error}")
         
         # Display Columns
         col_shelters, col_hospitals, col_responders = st.columns(3, gap="large")
@@ -80,14 +93,18 @@ if submit_search:
         with col_shelters:
             st.markdown("### 🏠 EMERGENCY SHELTERS")
             for shelter in shelters:
+                dist = shelter.get("distance_miles", shelter.get("distance", "N/A"))
+                dist_label = f"{dist} mi" if isinstance(dist, (int, float)) else str(dist)
+                capacity = shelter.get("capacity", shelter.get("status", "Unknown"))
+                address = shelter.get("address", "Address unavailable")
                 st.markdown(
                     f"""
                     <div class='glass-card' style='border-left: 4px solid #6366f1;'>
                         <h5 style='margin:0; color:#c7d2fe;'>{shelter['name']}</h5>
-                        <p style='margin:5px 0; font-size:0.85rem; color:#9ca3af;'>📍 {shelter['address']}</p>
+                        <p style='margin:5px 0; font-size:0.85rem; color:#9ca3af;'>📍 {address}</p>
                         <div style='display:flex; justify-content:space-between; margin-top:10px; font-size:0.8rem;'>
-                            <span style='color:#34d399;'>Capacity: {shelter['capacity']}</span>
-                            <span style='color:#818cf8;'>🚗 {shelter['distance']}</span>
+                            <span style='color:#34d399;'>Capacity: {capacity}</span>
+                            <span style='color:#818cf8;'>🚗 {dist_label}</span>
                         </div>
                     </div>
                     """,
@@ -97,14 +114,18 @@ if submit_search:
         with col_hospitals:
             st.markdown("### 🏥 HOSPITALS & CLINICS")
             for hospital in hospitals:
+                dist = hospital.get("distance_miles", hospital.get("distance", "N/A"))
+                dist_label = f"{dist} mi" if isinstance(dist, (int, float)) else str(dist)
+                status = hospital.get("status", "Unknown")
+                address = hospital.get("address", "Address unavailable")
                 st.markdown(
                     f"""
                     <div class='glass-card' style='border-left: 4px solid #ec4899;'>
                         <h5 style='margin:0; color:#fbcfe8;'>{hospital['name']}</h5>
-                        <p style='margin:5px 0; font-size:0.85rem; color:#9ca3af;'>📍 {hospital['address']}</p>
+                        <p style='margin:5px 0; font-size:0.85rem; color:#9ca3af;'>📍 {address}</p>
                         <div style='display:flex; justify-content:space-between; margin-top:10px; font-size:0.8rem;'>
-                            <span style='color:#f472b6;'>Status: {hospital['status']}</span>
-                            <span style='color:#f472b6;'>🚗 {hospital['distance']}</span>
+                            <span style='color:#f472b6;'>Status: {status}</span>
+                            <span style='color:#f472b6;'>🚗 {dist_label}</span>
                         </div>
                     </div>
                     """,
@@ -113,13 +134,19 @@ if submit_search:
                 
         with col_responders:
             st.markdown("### 🚒 RESCUE & POLICE")
+            responders = []
+            for ps in police_stations:
+                responders.append({"name": ps.get("name", ps.get("station", "Police Station")), "distance_miles": ps.get("distance_miles", ps.get("distance", "N/A")), "status": ps.get("status", "Active")})
+            for fs in fire_stations:
+                responders.append({"name": fs.get("name", fs.get("station", "Fire Station")), "distance_miles": fs.get("distance_miles", fs.get("distance", "N/A")), "status": fs.get("status", "Ready")})
             for unit in responders:
-                name = unit.get("station") or unit.get("police")
+                dist = unit.get("distance_miles", "N/A")
+                dist_label = f"{dist} mi" if isinstance(dist, (int, float)) else str(dist)
                 st.markdown(
                     f"""
                     <div class='glass-card' style='border-left: 4px solid #2dd4bf;'>
-                        <h5 style='margin:0; color:#ccfbf1;'>{name}</h5>
-                        <p style='margin:5px 0; font-size:0.85rem; color:#9ca3af;'>🚗 Distance: {unit['distance']}</p>
+                        <h5 style='margin:0; color:#ccfbf1;'>{unit['name']}</h5>
+                        <p style='margin:5px 0; font-size:0.85rem; color:#9ca3af;'>🚗 Distance: {dist_label}</p>
                         <div style='margin-top:10px; font-size:0.8rem;'>
                             <span style='background:rgba(45,212,191,0.15); color:#2dd4bf; padding:2px 8px; border-radius:10px;'>
                                 {unit['status']}

@@ -7,7 +7,6 @@ Defines structural endpoints for querying multi-agent crisis pipelines.
 import os
 import time
 import json
-import logging
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,10 +14,11 @@ from pydantic import BaseModel
 from typing import Dict, List, Any, Optional
 from langchain_core.messages import HumanMessage
 
+from logging_config import get_logger
+from error_handling import create_offline_response, fallback_manager
 from workflows.crisis_workflow import crisis_workflow
 
-# Configure logger
-logger = logging.getLogger("BackendAPI")
+logger = get_logger("BackendAPI")
 
 app = FastAPI(
     title="CrisisGuardian AI - API Portal",
@@ -113,6 +113,15 @@ rag_documents = []
 # ROUTE ENDPOINTS
 # =========================================================================
 
+@app.get("/")
+async def root():
+    """Root endpoint with service info."""
+    return {
+        "message": "Welcome to CrisisGuardian AI",
+        "status": "online",
+        "docs": "/docs"
+    }
+
 @app.get("/health")
 async def health_check():
     """
@@ -195,8 +204,14 @@ async def analyze_disaster(request: AnalyzeRequest):
             monitoring_data=monitoring_data
         )
     except Exception as e:
-        logger.error(f"Error in /analyze: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in /analyze: {e}", exc_info=True)
+        fallback_manager.mark_service_down("workflow", str(e))
+        offline = create_offline_response(
+            request.message,
+            request.location or "unknown location",
+            request.crisis_type or "general"
+        )
+        return AnalyzeResponse(**offline)
 
 @app.post("/resources", response_model=ResourcesResponse)
 async def find_resources(request: ResourcesRequest):
@@ -220,8 +235,16 @@ async def find_resources(request: ResourcesRequest):
             fire_stations=fire_stations
         )
     except Exception as e:
-        logger.error(f"Error in /resources: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in /resources: {e}", exc_info=True)
+        fallback_manager.mark_service_down("resource_tool", str(e))
+        from tools.resource_tool import ResourceTool
+        rt = ResourceTool()
+        return ResourcesResponse(
+            hospitals=rt.find_hospitals(request.location),
+            shelters=rt.find_shelters(request.location),
+            police_stations=[s for s in rt.find_emergency_services(request.location) if s.get("type") == "Police Station"],
+            fire_stations=[s for s in rt.find_emergency_services(request.location) if s.get("type") == "Fire Station"]
+        )
 
 @app.post("/document-analysis", response_model=DocumentAnalysisResponse)
 async def analyze_document(file: UploadFile = File(...)):

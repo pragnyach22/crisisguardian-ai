@@ -72,85 +72,111 @@ def delegate_crisis_tasks(event: dict) -> dict:
     
     # 1. WEATHER AGENT
     logger.info("Triggering Weather Agent node execution...")
-    # =========================================================================
-    # FUTURE MCP WEATHER TOOL INTEGRATION:
-    # Instead of mock return dicts, call the weather agent's weather_tool:
-    #   from tools.weather_tool import WeatherTool
-    #   wt = WeatherTool()
-    #   weather_data = wt.get_weather_alerts(location)
-    # =========================================================================
-    weather_result = {
-        "condition": "Severe rain forecast with flash flood watch",
-        "wind_speed": "75 km/h",
-        "precipitation_rate": "15mm/hr",
-        "source": "WeatherAgent (Meteorological Feed)"
-    }
-    
+    try:
+        from tools.weather_tool import WeatherTool
+        wt = WeatherTool()
+        current_weather = wt.get_current_weather(location)
+        weather_alerts = wt.get_weather_alerts(location)
+        weather_result = {
+            "condition": current_weather.get("condition", "Unknown"),
+            "wind_speed": f"{current_weather.get('wind_speed_kmh', 0)} km/h",
+            "precipitation_rate": f"{current_weather.get('humidity', 0)}% humidity",
+            "temperature_c": current_weather.get("temperature_c", 24),
+            "alerts": weather_alerts,
+            "source": current_weather.get("source", "WeatherTool")
+        }
+    except Exception as e:
+        logger.warning(f"Weather tool failed, using mock data: {e}")
+        weather_result = {
+            "condition": "Severe rain forecast with flash flood watch",
+            "wind_speed": "75 km/h",
+            "precipitation_rate": "15mm/hr",
+            "source": "WeatherAgent (Mock Fallback)"
+        }
+
     # 2. NEWS AGENT
     logger.info("Triggering News Agent node execution...")
-    # =========================================================================
-    # FUTURE MCP NEWS TOOL INTEGRATION:
-    # Call the news agent's news_tool to find municipal hazard notices:
-    #   from tools.news_tool import NewsTool
-    #   nt = NewsTool()
-    #   news_data = nt.fetch_emergency_broadcasts(location)
-    # =========================================================================
-    news_result = {
-        "active_warnings": [
-            "Mandatory evacuation ordered for Zone A (coastal strips)",
-            "District collector orders closing of harbor docks"
-        ],
-        "source": "NewsAgent (Emergency Civil Broadcast)"
-    }
-    
+    try:
+        from tools.news_tool import NewsTool
+        nt = NewsTool()
+        disaster_news = nt.fetch_disaster_news(location, event.get("crisis_type", "general"))
+        broadcasts = nt.fetch_emergency_broadcasts(location)
+        active_warnings = [n.get("headline", "") for n in disaster_news[:2]]
+        active_warnings += [b.get("instruction", "") for b in broadcasts[:2]]
+        news_result = {
+            "active_warnings": active_warnings or ["Monitor official local emergency channels."],
+            "source": "NewsAgent (Live Feed)"
+        }
+    except Exception as e:
+        logger.warning(f"News tool failed, using mock data: {e}")
+        news_result = {
+            "active_warnings": [
+                "Mandatory evacuation ordered for Zone A (coastal strips)",
+                "District collector orders closing of harbor docks"
+            ],
+            "source": "NewsAgent (Mock Fallback)"
+        }
+
     # 3. RESOURCE AGENT
     logger.info("Triggering Resource Agent node execution...")
-    # =========================================================================
-    # FUTURE MCP RESOURCE TOOL INTEGRATION:
-    # Call the resource agent's resource_tool to fetch coordinates:
-    #   from tools.resource_tool import ResourceTool
-    #   rt = ResourceTool()
-    #   resources = rt.find_shelters(location)
-    # =========================================================================
-    resources_result = {
-        "hospitals": [
-            {"name": "District Health Center Clinic", "distance": "1.2 miles", "status": "Active Capacity"}
-        ],
-        "shelters": [
-            {"name": "Cyclone Refuge Center B", "distance": "0.9 miles", "status": "Open"}
-        ],
-        "police_stations": [
-            {"name": "Coastal Safety Police Unit", "distance": "2.1 miles", "status": "Patrol Active"}
-        ],
-        "fire_stations": [
-            {"name": "Metro Fire Station 4", "distance": "1.4 miles", "status": "Ready"}
-        ]
-    }
-    
-    # 4. RISK AGENT
+    try:
+        from tools.resource_tool import ResourceTool
+        rt = ResourceTool()
+        hospitals = rt.find_hospitals(location)
+        shelters = rt.find_shelters(location)
+        services = rt.find_emergency_services(location)
+        resources_result = {
+            "hospitals": hospitals[:2] if hospitals else [{"name": "District Health Center", "distance": "N/A", "status": "Unknown"}],
+            "shelters": shelters[:2] if shelters else [{"name": "Emergency Shelter", "distance": "N/A", "status": "Unknown"}],
+            "police_stations": [s for s in services if s.get("type") == "Police Station"][:1],
+            "fire_stations": [s for s in services if s.get("type") == "Fire Station"][:1]
+        }
+    except Exception as e:
+        logger.warning(f"Resource tool failed, using mock data: {e}")
+        resources_result = {
+            "hospitals": [{"name": "District Health Center Clinic", "distance": "1.2 miles", "status": "Active Capacity"}],
+            "shelters": [{"name": "Cyclone Refuge Center B", "distance": "0.9 miles", "status": "Open"}],
+            "police_stations": [{"name": "Coastal Safety Police Unit", "distance": "2.1 miles", "status": "Patrol Active"}],
+            "fire_stations": [{"name": "Metro Fire Station 4", "distance": "1.4 miles", "status": "Ready"}]
+        }
+
+    # 4. RISK AGENT — derive from crisis type + weather, not location alone
     logger.info("Triggering Risk Agent node execution...")
-    # =========================================================================
-    # FUTURE INTEGRATION:
-    # Calculate composite danger scales based on weather + news vectors:
-    #   risk_score = risk_agent.run(...)
-    # =========================================================================
-    risk_level = "HIGH"
-    
+    cond = str(weather_result.get("condition", "")).lower()
+    wind_raw = str(weather_result.get("wind_speed", "0")).replace(" km/h", "")
+    try:
+        wind_val = float(wind_raw.split()[0])
+    except (ValueError, IndexError):
+        wind_val = 0.0
+    crisis_type = event.get("crisis_type", "general")
+
+    if crisis_type == "cyclone" and ("cyclone" in cond or wind_val >= 62):
+        risk_level = "CRITICAL"
+    elif crisis_type == "cyclone":
+        risk_level = "HIGH"
+    elif crisis_type == "flood" and ("rain" in cond or "flood" in cond):
+        risk_level = "HIGH"
+    elif crisis_type == "flood":
+        risk_level = "MODERATE"
+    elif crisis_type in ("earthquake", "fire"):
+        risk_level = "HIGH"
+    elif crisis_type == "general":
+        risk_level = "LOW"
+    else:
+        risk_level = "MODERATE"
+
     # 5. RESPONSE AGENT
     logger.info("Triggering Response Agent node execution...")
-    # =========================================================================
-    # FUTURE INTEGRATION:
-    # Compile the final safety report for presentation:
-    #   final_guidance = response_agent.run(...)
-    # =========================================================================
+    shelter_name = resources_result["shelters"][0].get("name", "nearest shelter") if resources_result["shelters"] else "nearest shelter"
+    shelter_dist = resources_result["shelters"][0].get("distance", "unknown distance") if resources_result["shelters"] else "unknown distance"
     final_response = (
         f"EMERGENCY DIRECTIVE FOR {location.upper()}: "
-        "A flash flood watch is active. Local alerts verify severe wind vectors. "
-        "Evacuate to Cyclone Refuge Center B (0.9 miles away). Stay indoors, "
+        f"Threat level is {risk_level}. Weather: {weather_result.get('condition', 'Unknown')}. "
+        f"Evacuate to {shelter_name} ({shelter_dist} away). Stay indoors, "
         "charge communication devices, and keep emergency supplies ready."
     )
-    
-    # Build structured response matching layout specs
+
+    # Build structured response
     structured_response = {
         "weather": weather_result,
         "news": news_result,
@@ -158,6 +184,6 @@ def delegate_crisis_tasks(event: dict) -> dict:
         "risk_level": risk_level,
         "final_response": final_response
     }
-    
+
     logger.info("Multi-agent task delegation successfully compiled.")
     return structured_response

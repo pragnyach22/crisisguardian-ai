@@ -7,30 +7,34 @@ CrisisGuardian AI is a premium multi-agent disaster response assistant designed 
 ```mermaid
 graph TD
     User([Citizen/User]) -->|Interact| Streamlit[Streamlit Frontend]
-    Streamlit -->|HTTP POST /api/chat| FastAPI[FastAPI Backend]
-    FastAPI -->|Invoke State| LangGraph[LangGraph Coordinator]
+    Streamlit -->|HTTP POST /analyze| FastAPI[FastAPI Backend]
+    FastAPI -->|Invoke State| LangGraph[LangGraph Crisis Workflow]
     
-    subgraph Multi-Agent Hub
-        LangGraph -->|Routes| Supervisor[Emergency Supervisor Node]
-        Supervisor -->|Delegates| FloodAgent[Flood Specialist]
-        Supervisor -->|Delegates| CycloneAgent[Cyclone Specialist]
-        Supervisor -->|Delegates| EarthquakeAgent[Earthquake Specialist]
-        Supervisor -->|Delegates| FireAgent[Fire Specialist]
+    subgraph Multi-Agent Pipeline
+        LangGraph --> Coordinator[Coordinator Node]
+        Coordinator --> Weather[Weather Agent Node]
+        Weather --> News[News Agent Node]
+        News --> Resource[Resource Agent Node]
+        Resource --> Risk[Risk Agent Node]
+        Risk --> Response[Response Agent Node]
+        Response --> Checklist[Checklist Node]
     end
     
-    subgraph Extensible Tools
-        FloodAgent --> Tools[Disaster Tools API]
-        CycloneAgent --> Tools
-        EarthquakeAgent --> Tools
-        FireAgent --> Tools
-        
-        Tools --> Weather[Weather Alerts API]
-        Tools --> Seismic[USGS Earthquake Query]
-        Tools --> Shelter[Shelter Locator]
-        Tools --> SOS[Emergency Rescue Dispatch]
+    subgraph Crisis Tools
+        Weather --> WeatherTool[WeatherTool - OpenWeatherMap]
+        News --> NewsTool[NewsTool - Emergency Bulletins]
+        Resource --> ResourceTool[ResourceTool - OSM Nominatim]
+        Risk --> Gemini[Gemini 2.5 Flash]
+        Response --> Gemini
     end
     
-    Multi-Agent Hub -->|LLM Reasoning| Gemini[Gemini 2.5 Flash]
+    subgraph Disaster Specialists
+        FastAPI -->|Chat routing| Supervisor[Emergency Supervisor]
+        Supervisor --> FloodAgent[Flood Specialist]
+        Supervisor --> CycloneAgent[Cyclone Specialist]
+        Supervisor --> EarthquakeAgent[Earthquake Specialist]
+        Supervisor --> FireAgent[Fire Specialist]
+    end
 ```
 
 ## Module Architecture
@@ -38,27 +42,29 @@ graph TD
 ### 1. Base Agent Framework (`agents/base_agent.py`)
 - Employs `ChatGoogleGenerativeAI` wrapper powered by the `gemini-2.5-flash` model.
 - Standardizes parameter settings (default temperature of 0.2 for precise, fact-based response generation).
-- Creates prompt configurations dividing instruction levels between system prompts and user parameters.
 
 ### 2. Specialized Disaster Agents (`agents/disaster_agents.py`)
-- **FloodResponseAgent**: Focused on route safety, vertical evacuation directives, utility mitigation, and sanitation rules.
-- **CycloneResponseAgent**: Specialized in window protection, storm shelters, immediate tracking, and post-storm danger warnings.
-- **EarthquakeResponseAgent**: Governs Drop-Cover-Hold rules, outdoor open area guidelines, and aftershock safety procedures.
-- **FireResponseAgent**: Instructs on escape pathing (smoke navigation), wildfire structural clearance, and immediate evacuation protocols.
-- **EmergencySupervisorAgent**: Acts as a state dispatcher, classifying initial requests, determining which agent to call, and handling general emergency inquiries.
+- **FloodResponseAgent**: Route safety, vertical evacuation, utility mitigation.
+- **CycloneResponseAgent**: Window protection, storm shelters, post-storm warnings.
+- **EarthquakeResponseAgent**: Drop-Cover-Hold rules, aftershock safety.
+- **FireResponseAgent**: Escape pathing, wildfire evacuation protocols.
+- **EmergencySupervisorAgent**: Classifies requests and routes to specialists.
 
-### 3. Integrated State Machine Workflows (`workflows/disaster_workflow.py`)
-- Powered by `LangGraph` defining node state components including active messages, disaster class state, coordinates, and final response.
-- Includes a conditional routing edge mapping supervisor node routing parameters directly to specialized target agents.
+### 3. Crisis Workflow (`workflows/crisis_workflow.py`)
+- Powered by `LangGraph` with 7 sequential nodes: Coordinator → Weather → News → Resource → Risk → Response → Checklist.
+- State includes location, crisis type, gathered data, risk assessment, and final guidance.
 
-### 4. Custom API Tools (`tools/disaster_tools.py`)
-- Leverages the LangChain `@tool` decorator structure.
-- **Weather Alerts**: Fetches mock warning advisories for localized areas.
-- **Earthquake Alerts**: Connects live to the USGS geojson feed to fetch recent magnitude 4.0+ events.
-- **Shelter Search**: Resolves locations to lists of available high-safety community shelter spots.
-- **SOS Alerting**: Simulated dispatcher notifying local emergency services.
+### 4. Crisis Tools (`tools/`)
+- **WeatherTool**: OpenWeatherMap integration with alert generation.
+- **NewsTool**: Disaster news and emergency broadcast retrieval.
+- **ResourceTool**: OSM Nominatim geocoding for shelters, hospitals, and emergency services.
+- **disaster_tools.py**: LangChain `@tool` wrappers for weather alerts, earthquakes, shelters, and SOS.
 
-### 5. Backend Server API (`backend/app.py`)
-- FastAPI service layer running locally on Uvicorn.
-- CORS-enabled routes supporting multi-origin client requests.
-- Runs the active LangGraph flow, falling back to mock routing simulations if `GEMINI_API_KEY` is not present in `.env`.
+### 5. Backend Server API (`backend/api.py`)
+- FastAPI service layer running on Uvicorn via `main.py`.
+- Endpoints: `/health`, `/analyze`, `/resources`, `/document-analysis`, `/document-query`, `/api/sos`, `/system-status`, `/agent-status`.
+- Integrated with `error_handling.py` for offline fallback responses and `logging_config.py` for centralized logging.
+
+### 6. Frontend (`frontend/`)
+- Streamlit multi-page dashboard with glassmorphic dark theme.
+- Pages communicate with the FastAPI backend for disaster analysis, resource lookup, document RAG, and system monitoring.

@@ -7,8 +7,11 @@ import os
 import uvicorn
 from dotenv import load_dotenv
 
+from logging_config import configure_logging
+
 # Load environment variables from .env file
 load_dotenv()
+configure_logging()
 
 if __name__ == "__main__":
     host = os.getenv("BACKEND_HOST", "127.0.0.1")

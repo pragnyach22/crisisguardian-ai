@@ -5,13 +5,6 @@ Identifies emergency locations, safe zones, shelters, and hospital services.
 Supports integration with maps or geospatial MCP servers.
 """
 
-from typing import List, Dict, Any
-
-class ResourceTool:
-    """
-    Object-oriented system to find safety hubs, relief centers, hospitals, and dispatch contacts.
-    """
-
 import math
 import requests
 from typing import List, Dict, Any

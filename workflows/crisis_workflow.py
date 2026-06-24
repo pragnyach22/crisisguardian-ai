@@ -65,6 +65,85 @@ def log_node_telemetry(node_name: str, state: CrisisWorkflowState, status: str, 
     return monitoring_data
 
 
+def _score_to_risk_level(score: int) -> str:
+    """Maps a 1-10 risk score to a threat tier label."""
+    if score >= 9:
+        return "Critical"
+    if score >= 7:
+        return "High"
+    if score >= 4:
+        return "Moderate"
+    return "Low"
+
+
+def _compute_risk_assessment(
+    disaster_type: str,
+    weather: Dict[str, Any],
+    news: Optional[List[Dict[str, Any]]] = None,
+) -> tuple[int, str, str]:
+    """
+    Rule-based risk scoring aligned to the active crisis type.
+    Prevents location-based mock weather from inflating unrelated queries.
+    """
+    disaster_type = (disaster_type or "general").lower()
+    weather_curr = weather.get("current", {}) if weather else {}
+    cond = str(weather_curr.get("condition", "")).lower()
+    wind = float(weather_curr.get("wind_speed_kmh", 0) or 0)
+    alerts = weather.get("alerts", []) if weather else []
+    news = news or []
+
+    base_scores = {
+        "general": 2,
+        "fire": 5,
+        "flood": 5,
+        "earthquake": 6,
+        "cyclone": 6,
+    }
+    score = base_scores.get(disaster_type, 3)
+    reasons = []
+
+    if disaster_type == "cyclone":
+        if "cyclone" in cond or wind >= 62:
+            score += 3
+            reasons.append(f"cyclonic conditions with {wind} km/h winds")
+        elif wind >= 40:
+            score += 1
+            reasons.append("elevated wind speeds near coast")
+        else:
+            reasons.append("cyclone inquiry with no extreme wind readings yet")
+    elif disaster_type == "flood":
+        if "rain" in cond or "thunderstorm" in cond or "flood" in cond:
+            score += 2
+            reasons.append("heavy rainfall increasing flood risk")
+        else:
+            reasons.append("flood-related inquiry without active rainfall")
+    elif disaster_type == "earthquake":
+        score += 1 if news else 0
+        reasons.append("seismic event reported" if news else "earthquake preparedness context")
+    elif disaster_type == "fire":
+        if wind >= 30 or "clear" in cond:
+            score += 1
+            reasons.append("dry or windy conditions may spread fire")
+        else:
+            reasons.append("fire safety inquiry")
+    else:
+        score = min(score, 3)
+        if alerts:
+            score += 1
+            reasons.append("minor weather advisories present")
+        else:
+            reasons.append("general preparedness — no active emergency detected")
+
+    if disaster_type != "general" and len(news) >= 2:
+        score += 1
+        reasons.append("multiple official bulletins corroborate the threat")
+
+    score = max(1, min(10, score))
+    level = _score_to_risk_level(score)
+    reason = "; ".join(reasons) + f". Assessed tier: {level} ({score}/10)."
+    return score, level, reason
+
+
 # 2. Node Implementations (Agent Execution Steps)
 def coordinator_node(state: CrisisWorkflowState) -> Dict[str, Any]:
     """
@@ -142,12 +221,13 @@ def weather_node(state: CrisisWorkflowState) -> Dict[str, Any]:
     start_time = time.time()
     logger.info("Executing Weather Agent...")
     location = state.get("location") or "General Region"
+    crisis_type = state.get("crisis_type") or "general"
     
     try:
         from tools.weather_tool import WeatherTool
         wt = WeatherTool()
-        current = wt.get_current_weather(location)
-        alerts = wt.get_weather_alerts(location)
+        current = wt.get_current_weather(location, crisis_type)
+        alerts = wt.get_weather_alerts(location, crisis_type)
         weather_data = {
             "current": current,
             "alerts": alerts,
@@ -256,7 +336,10 @@ def risk_node(state: CrisisWorkflowState) -> Dict[str, Any]:
     disaster_type = state.get("crisis_type") or "general"
     location = state.get("location") or "General Region"
     weather = state.get("weather_data") or {}
+    news = state.get("news_data") or []
     resources = state.get("resource_data") or {}
+
+    rule_score, rule_level, rule_reason = _compute_risk_assessment(disaster_type, weather, news)
     
     api_key = os.getenv("GEMINI_API_KEY")
     if api_key and api_key != "your_gemini_api_key_here":
@@ -268,7 +351,13 @@ def risk_node(state: CrisisWorkflowState) -> Dict[str, Any]:
                 f"- Disaster Type: {disaster_type}\n"
                 f"- Location: {location}\n"
                 f"- Weather details: {weather}\n"
+                f"- News bulletins: {news}\n"
                 f"- Available local facilities: {resources}\n\n"
+                "Scoring rules:\n"
+                "- Use Critical (9-10) ONLY for imminent life-threatening conditions matching the disaster type.\n"
+                "- Use Low/Moderate (1-5) for general preparedness questions with no active emergency.\n"
+                "- Do NOT escalate to Critical for unrelated weather or location alone.\n"
+                "- Match severity to the stated disaster type, not worst-case assumptions.\n\n"
                 "Determine:\n"
                 "1. Risk Score: integer 1 to 10\n"
                 "2. Risk Level: Low, Moderate, High, or Critical\n"
@@ -285,52 +374,37 @@ def risk_node(state: CrisisWorkflowState) -> Dict[str, Any]:
             clean_res = response.content.replace("```json", "").replace("```", "").strip()
             data = json.loads(clean_res)
             
-            risk_score = int(data.get("risk_score", 5))
-            risk_level = data.get("risk_level", "Moderate")
-            risk_reason = data.get("risk_reason", "Calculated threat level.")
+            llm_score = int(data.get("risk_score", rule_score))
+            llm_level = str(data.get("risk_level", rule_level)).title()
+            llm_reason = data.get("risk_reason", rule_reason)
+
+            # For general inquiries, cap LLM escalation to rule-based ceiling
+            if disaster_type == "general":
+                llm_score = min(llm_score, rule_score + 1, 5)
+                llm_level = _score_to_risk_level(llm_score)
+            # Prefer the more conservative (lower) score when LLM overshoots rules by 2+
+            elif llm_score > rule_score + 2:
+                llm_score = rule_score + 1
+                llm_level = _score_to_risk_level(llm_score)
+                llm_reason = f"{llm_reason} (Calibrated against operational rules: {rule_reason})"
+
             mon = log_node_telemetry("Risk Agent", state, "Completed", start_time)
             
             return {
-                "risk_level": risk_level,
-                "risk_score": risk_score,
-                "risk_reason": risk_reason,
+                "risk_level": llm_level,
+                "risk_score": llm_score,
+                "risk_reason": llm_reason,
                 "monitoring_data": mon
             }
         except Exception as e:
             logger.error(f"Risk Analyst LLM call failed: {e}")
             
-    # Standard fallback risk evaluation
-    score = 5
-    level = "Moderate"
-    reason = "Calculated safety margin based on default metrics."
-    
-    weather_curr = weather.get("current", {})
-    cond = str(weather_curr.get("condition", "")).lower()
-    wind = weather_curr.get("wind_speed_kmh", 0.0)
-    
-    if "cyclone" in cond or wind > 70 or disaster_type == "cyclone":
-        score = 9
-        level = "Critical"
-        reason = f"Active cyclone warning. Extremely fast winds ({wind} km/h) present high risk of building damage and storm surges."
-    elif "rain" in cond or "flood" in cond or disaster_type == "flood":
-        score = 7
-        level = "High"
-        reason = "Continuous heavy rainfall is triggering local flood watches and threatening utility grids."
-    elif disaster_type == "earthquake":
-        score = 8
-        level = "High"
-        reason = "Seismic vibrations reported. Structural integrity of local routes must be assessed."
-    elif disaster_type == "fire":
-        score = 8
-        level = "High"
-        reason = "Wildfire spread indicators elevated by localized dry conditions and wind gusts."
-
     mon = log_node_telemetry("Risk Agent", state, "Completed", start_time)
     
     return {
-        "risk_level": level,
-        "risk_score": score,
-        "risk_reason": reason,
+        "risk_level": rule_level,
+        "risk_score": rule_score,
+        "risk_reason": rule_reason,
         "monitoring_data": mon
     }
 

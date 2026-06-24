@@ -22,6 +22,7 @@ render_sidebar_branding()
 
 # Backend URL configuration
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+ANALYZE_TIMEOUT = int(os.getenv("ANALYZE_TIMEOUT", "120"))
 
 st.markdown("<div class='page-title'>Disaster Analysis</div>", unsafe_allow_html=True)
 st.markdown("<div class='page-subtitle'>Submit emergency queries to trigger multi-agent pipeline evaluations</div>", unsafe_allow_html=True)
@@ -54,7 +55,7 @@ with st.container():
         st.info(f"Preset loaded: '{selected_example}'")
         user_query = selected_example
         
-    location_input = st.text_input("Target Location (Optional)", value="Andhra Pradesh")
+    location_input = st.text_input("Target Location (Optional)", placeholder="e.g. Andhra Pradesh, Mumbai")
     
     # Trigger Button
     submit_analysis = st.button("🚨 Analyze Situation", use_container_width=True)
@@ -62,66 +63,117 @@ with st.container():
 
 # 2. Results Container
 if submit_analysis:
-    if not user_query.strip():
-        st.warning("Please enter a query or select an example to run the analysis.")
-    else:
-        with st.spinner("Invoking CrisisGuardian agent network..."):
-            # =========================================================================
-            # FASTAPI BACKEND API INTEGRATION POINT:
-            # Here, the frontend communicates with the FastAPI /analyze endpoint.
-            #
-            # Example API Request:
-            #   payload = {
-            #       "user_id": "streamlit-web-client",
-            #       "message": user_query,
-            #       "location": location_input,
-            #       "crisis_type": "general" # Can be classified or parsed
-            #   }
-            #   response = requests.post(f"{BACKEND_URL}/analyze", json=payload)
-            #   if response.status_code == 200:
-            #       data = response.json()
-            # =========================================================================
-            
-            # Simulated API Request Fallback
-            try:
-                # Attempt backend post call
-                payload = {
-                    "user_id": "streamlit-frontend",
-                    "message": user_query,
-                    "location": location_input,
-                    "crisis_type": "cyclone" if "cyclone" in user_query.lower() else "flood"
-                }
-                # Make HTTP call to FastAPI
-                api_response = requests.post(f"{BACKEND_URL}/analyze", json=payload, timeout=5)
-                if api_response.status_code == 200:
-                    api_data = api_response.json()
-                    
-                    risk_level = api_data.get("threat_level")
-                    verification = "Verified via News Agent"
-                    weather_summary = "Active Cyclone watch. Wind speeds scaling up to 90kmh near coastlines."
-                    emergency_updates = api_data.get("guidance")
-                    recommended_actions = api_data.get("recommended_actions")
-                    is_mock = False
-                else:
-                    raise Exception("Backend error")
-            except Exception:
-                # Mock details if backend is offline
-                risk_level = "High Threat (Mock)"
-                verification = "Verified by News & Risk Agents"
-                weather_summary = "Precipitation exceeding 120mm. Moderate high winds detected in region."
-                emergency_updates = "District collector issued storm shelter warnings. Local bridges closed."
-                recommended_actions = [
-                    "Evacuate low-lying river areas.",
-                    "Seek cover in concrete shelter hubs.",
-                    "Store 3 days of sanitized drinking water."
-                ]
-                is_mock = True
+        if not user_query.strip():
+            st.warning("Please enter a query or select an example to run the analysis.")
+        else:
+            with st.spinner("Running multi-agent analysis — this may take 15–30 seconds..."):
+                # =========================================================================
+                # FASTAPI BACKEND API INTEGRATION POINT:
+                # Here, the frontend communicates with the FastAPI /analyze endpoint.
+                #
+                # Example API Request:
+                #   payload = {
+                #       "user_id": "streamlit-web-client",
+                #       "message": user_query,
+                #       "location": location_input,
+                #       "crisis_type": "general" # Can be classified or parsed
+                #   }
+                #   response = requests.post(f"{BACKEND_URL}/analyze", json=payload)
+                #   if response.status_code == 200:
+                #       data = response.json()
+                # =========================================================================
                 
-        # Display Output Panels in column layout
-        st.success("Analysis Complete!")
-        if is_mock:
-            st.info("💡 Backend server not detected. Showing local mock simulations.")
-            
+                backend_error = None
+                try:
+                    # Dynamically detect crisis type from the query
+                    query_lower = user_query.lower()
+                    if "cyclone" in query_lower or "hurricane" in query_lower or "storm" in query_lower or "wind" in query_lower:
+                        detected_crisis = "cyclone"
+                    elif "flood" in query_lower or "rain" in query_lower or "water" in query_lower:
+                        detected_crisis = "flood"
+                    elif "earthquake" in query_lower or "tremor" in query_lower or "quake" in query_lower or "seismic" in query_lower:
+                        detected_crisis = "earthquake"
+                    elif "fire" in query_lower or "wildfire" in query_lower or "smoke" in query_lower or "burn" in query_lower:
+                        detected_crisis = "fire"
+                    else:
+                        detected_crisis = "general"
+
+                    payload = {
+                        "user_id": "streamlit-frontend",
+                        "message": user_query,
+                        "location": location_input,
+                        "crisis_type": detected_crisis
+                    }
+                    # Make HTTP call to FastAPI
+                    api_response = requests.post(
+                        f"{BACKEND_URL}/analyze",
+                        json=payload,
+                        timeout=ANALYZE_TIMEOUT
+                    )
+                    if api_response.status_code == 200:
+                        api_data = api_response.json()
+                        
+                        risk_level = api_data.get("threat_level")
+                        verification = api_data.get("verification_status", "Verified via News Agent")
+                        weather_summary = api_data.get("weather_summary", "Active Cyclone watch. Wind speeds scaling up to 90kmh near coastlines.")
+                        emergency_updates = api_data.get("guidance")
+                        recommended_actions = api_data.get("recommended_actions")
+                        is_mock = False
+                    else:
+                        backend_error = f"Backend returned status {api_response.status_code}: {api_response.text}"
+                        raise Exception(backend_error)
+                except requests.exceptions.Timeout:
+                    backend_error = (
+                        f"Analysis timed out after {ANALYZE_TIMEOUT}s. "
+                        "The backend may still be processing — try again or increase ANALYZE_TIMEOUT."
+                    )
+                    is_mock = True
+                    risk_level = "High Threat (Mock)"
+                    verification = "Verified by News & Risk Agents"
+                    weather_summary = "Precipitation exceeding 120mm. Moderate high winds detected in region."
+                    emergency_updates = "District collector issued storm shelter warnings. Local bridges closed."
+                    recommended_actions = [
+                        "Evacuate low-lying river areas.",
+                        "Seek cover in concrete shelter hubs.",
+                        "Store 3 days of sanitized drinking water."
+                    ]
+                except requests.exceptions.ConnectionError:
+                    backend_error = "Cannot connect to backend. Start it with: python main.py"
+                    is_mock = True
+                    risk_level = "High Threat (Mock)"
+                    verification = "Verified by News & Risk Agents"
+                    weather_summary = "Precipitation exceeding 120mm. Moderate high winds detected in region."
+                    emergency_updates = "District collector issued storm shelter warnings. Local bridges closed."
+                    recommended_actions = [
+                        "Evacuate low-lying river areas.",
+                        "Seek cover in concrete shelter hubs.",
+                        "Store 3 days of sanitized drinking water."
+                    ]
+                except Exception as e:
+                    backend_error = backend_error or str(e)
+                    # Mock details if backend is offline or request fails
+                    risk_level = "High Threat (Mock)"
+                    verification = "Verified by News & Risk Agents"
+                    weather_summary = "Precipitation exceeding 120mm. Moderate high winds detected in region."
+                    emergency_updates = "District collector issued storm shelter warnings. Local bridges closed."
+                    recommended_actions = [
+                        "Evacuate low-lying river areas.",
+                        "Seek cover in concrete shelter hubs.",
+                        "Store 3 days of sanitized drinking water."
+                    ]
+                    is_mock = True
+                    
+            # Display Output Panels in column layout
+            st.success("Analysis Complete!")
+            if is_mock:
+                if backend_error and "Cannot connect" in backend_error:
+                    st.info("💡 Backend server not detected. Showing local mock simulations.")
+                elif backend_error and "timed out" in backend_error.lower():
+                    st.info("💡 Backend is running but the analysis took too long. Showing local mock data.")
+                else:
+                    st.info("💡 Backend unavailable. Showing local mock simulations.")
+                if backend_error:
+                    st.warning(f"Backend request error: {backend_error}")
         col_res1, col_res2 = st.columns([1, 2], gap="large")
         
         with col_res1:

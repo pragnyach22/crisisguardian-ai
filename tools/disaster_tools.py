@@ -5,9 +5,7 @@ nearest shelters, and sending SOS notifications.
 """
 
 import requests
-from langchain_core.tools import tool
 
-@tool
 def get_weather_alerts(location: str) -> str:
     """
     Fetches active weather warnings and cyclone/flood alerts for a specific location.
@@ -20,7 +18,7 @@ def get_weather_alerts(location: str) -> str:
         "Precipitation levels exceed 150mm/hr. Rivers in vicinity are rising rapidly."
     )
 
-@tool
+
 def get_earthquake_alerts(min_magnitude: float = 4.0) -> str:
     """
     Fetches recent high-magnitude earthquake events globally or regionally.
@@ -52,7 +50,6 @@ def get_earthquake_alerts(min_magnitude: float = 4.0) -> str:
         
     return "Failed to retrieve earthquake alerts. Please try again later."
 
-@tool
 def find_nearest_shelter(location: str, disaster_type: str) -> str:
     """
     Finds safety shelters in a specified location relevant to the disaster type (e.g., cyclone dome, high-ground flood shelter).
@@ -66,7 +63,6 @@ def find_nearest_shelter(location: str, disaster_type: str) -> str:
         "3. Local Stadium Safe Zone (First Aid & Food Station) - 3.1 miles away"
     )
 
-@tool
 def send_sos_notification(user_id: str, coordinates: str, description: str) -> str:
     """
     Triggers an emergency SOS dispatch alert sending user location and details to authorities.

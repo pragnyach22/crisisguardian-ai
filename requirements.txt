@@ -2,6 +2,8 @@ google-adk
 langgraph
 langchain
 langchain-google-genai
+langchain-community
+langchain-text-splitters
 fastapi
 uvicorn
 streamlit
@@ -10,4 +12,5 @@ pydantic
 requests
 pypdf
 faiss-cpu
+pytest
 

@@ -31,7 +31,7 @@ with metric_col1:
     st.markdown(
         """
         <div class='glass-card'>
-            <div class='metric-val' style='color:#a78bfa;'>11</div>
+            <div class='metric-val' style='color:#a78bfa;'>6</div>
             <div class='metric-label'>Active Agents</div>
         </div>
         """,
