@@ -20,18 +20,34 @@ RESET = '\033[0m'
 CHECK = '✓'
 CROSS = '✗'
 
+def safe_print(text: str):
+    """Prints text, falling back to ASCII if encoding fails."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        fallback_text = (
+            text.replace('╔', '+').replace('═', '-').replace('╗', '+')
+                .replace('║', '|').replace('╚', '+').replace('╝', '+')
+                .replace('✓', '[PASS]').replace('✗', '[FAIL]')
+                .replace('→', '->').replace('⚠', '[WARN]')
+        )
+        try:
+            print(fallback_text)
+        except UnicodeEncodeError:
+            print(fallback_text.encode('ascii', errors='replace').decode('ascii'))
+
 def print_header(text: str):
     """Print section header."""
-    print(f"\n{BLUE}{'='*60}{RESET}")
-    print(f"{BLUE}{text.center(60)}{RESET}")
-    print(f"{BLUE}{'='*60}{RESET}\n")
+    safe_print(f"\n{BLUE}{'='*60}{RESET}")
+    safe_print(f"{BLUE}{text.center(60)}{RESET}")
+    safe_print(f"{BLUE}{'='*60}{RESET}\n")
 
 def print_check(text: str, status: bool, details: str = ""):
     """Print check result."""
     symbol = f"{GREEN}{CHECK}{RESET}" if status else f"{RED}{CROSS}{RESET}"
-    print(f"{symbol} {text}")
+    safe_print(f"{symbol} {text}")
     if details:
-        print(f"  → {details}")
+        safe_print(f"  → {details}")
 
 def check_python_version():
     """Check Python version."""
@@ -71,7 +87,7 @@ def check_environment_file():
         return has_env and has_key
     else:
         if env_template.exists():
-            print(f"\n  {YELLOW}Hint:{RESET} Copy .env.template to .env and add your API keys")
+            safe_print(f"\n  {YELLOW}Hint:{RESET} Copy .env.template to .env and add your API keys")
         return False
 
 def check_dependencies():
@@ -131,7 +147,7 @@ def check_api_connectivity():
         print_check("Backend API running", is_healthy)
         if is_healthy:
             data = response.json()
-            print(f"  → Service: {data.get('service', 'Unknown')}")
+            safe_print(f"  → Service: {data.get('service', 'Unknown')}")
         return is_healthy
     except requests.exceptions.ConnectionError:
         print_check("Backend API running", False, "Start with: python main.py")
@@ -225,11 +241,11 @@ def run_quick_tests():
             print_check("Unit tests passed", True)
             # Count passed tests
             passed = result.stdout.count(" PASSED")
-            print(f"  → {passed} tests passed")
+            safe_print(f"  → {passed} tests passed")
             return True
         else:
             print_check("Unit tests", False)
-            print(result.stdout[-500:] if len(result.stdout) > 500 else result.stdout)
+            safe_print(result.stdout[-500:] if len(result.stdout) > 500 else result.stdout)
             return False
     except FileNotFoundError:
         print_check("pytest installed", False, "Install with: pip install pytest")
@@ -243,11 +259,11 @@ def run_quick_tests():
 
 def main():
     """Run all verification checks."""
-    print(f"\n{BLUE}")
-    print("╔════════════════════════════════════════════════════════╗")
-    print("║         CrisisGuardian AI - System Verification         ║")
-    print("╚════════════════════════════════════════════════════════╝")
-    print(f"{RESET}")
+    safe_print(f"\n{BLUE}")
+    safe_print("╔════════════════════════════════════════════════════════╗")
+    safe_print("║         CrisisGuardian AI - System Verification         ║")
+    safe_print("╚════════════════════════════════════════════════════════╝")
+    safe_print(f"{RESET}")
     
     results = {}
     
@@ -273,22 +289,22 @@ def main():
     
     for check_name, status in results.items():
         symbol = f"{GREEN}{CHECK}{RESET}" if status else f"{RED}{CROSS}{RESET}"
-        print(f"{symbol} {check_name}")
+        safe_print(f"{symbol} {check_name}")
     
-    print(f"\n{BLUE}Results: {passed}/{total} checks passed{RESET}")
+    safe_print(f"\n{BLUE}Results: {passed}/{total} checks passed{RESET}")
     
     if passed == total:
-        print(f"\n{GREEN}✓ All checks passed! System is ready to use.{RESET}")
-        print(f"\n{BLUE}Next steps:{RESET}")
-        print("1. Run backend: python main.py")
-        print("2. Run frontend: streamlit run frontend/app.py")
-        print("3. Open http://localhost:8501 in your browser")
+        safe_print(f"\n{GREEN}✓ All checks passed! System is ready to use.{RESET}")
+        safe_print(f"\n{BLUE}Next steps:{RESET}")
+        safe_print("1. Run backend: python main.py")
+        safe_print("2. Run frontend: streamlit run frontend/app.py")
+        safe_print("3. Open http://localhost:8501 in your browser")
         return 0
     else:
-        print(f"\n{YELLOW}⚠ Some checks failed. Please review the issues above.{RESET}")
+        safe_print(f"\n{YELLOW}⚠ Some checks failed. Please review the issues above.{RESET}")
         if not results.get("API Connectivity"):
-            print(f"\n{BLUE}Hint:{RESET} Start the backend server in another terminal:")
-            print("  python main.py")
+            safe_print(f"\n{BLUE}Hint:{RESET} Start the backend server in another terminal:")
+            safe_print("  python main.py")
         return 1
 
 if __name__ == "__main__":
