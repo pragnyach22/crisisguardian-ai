@@ -39,6 +39,13 @@ with st.container():
     st.markdown("</div>", unsafe_allow_html=True)
 
 # 2. Analysis Results
+# Clear session state if file changes
+if uploaded_file is not None and st.session_state.get("uploaded_file_name") != uploaded_file.name:
+    st.session_state.doc_analyzed = False
+    st.session_state.doc_answer = None
+    if "doc_answer" in st.session_state:
+        del st.session_state.doc_answer
+
 if submit_analysis:
     if uploaded_file is None:
         st.warning("Please upload a PDF document first before starting the analysis.")
@@ -84,35 +91,55 @@ if submit_analysis:
                     "Collect non-perishable rations (minimum 72-hour supply per individual).",
                     "Mark out primary and secondary high-ground egress lines on district maps."
                 ]
+            
+            st.session_state.doc_analyzed = True
+            st.session_state.summary = summary
+            st.session_state.key_warnings = key_warnings
+            st.session_state.recommended_actions = recommended_actions
+            st.session_state.doc_name = doc_name
+            st.session_state.is_mock = is_mock
+            st.session_state.backend_error = backend_error
+            st.session_state.uploaded_file_name = uploaded_file.name
 
-        st.success("Document analyzed successfully!")
-        if is_mock:
-            st.info("Backend unavailable — showing local fallback analysis.")
-            if backend_error:
-                st.warning(f"Backend request error: {backend_error}")
+# If a document has been analyzed, display the results
+if st.session_state.get("doc_analyzed") and uploaded_file is not None and st.session_state.get("uploaded_file_name") == uploaded_file.name:
+    summary = st.session_state.summary
+    key_warnings = st.session_state.key_warnings
+    recommended_actions = st.session_state.recommended_actions
+    is_mock = st.session_state.is_mock
+    backend_error = st.session_state.backend_error
+    doc_name = st.session_state.doc_name
+    
+    st.success("Document analyzed successfully!")
+    if is_mock:
+        st.info("Backend unavailable — showing local fallback analysis.")
+        if backend_error:
+            st.warning(f"Backend request error: {backend_error}")
 
-        col_left, col_right = st.columns(2, gap="large")
+    col_left, col_right = st.columns(2, gap="large")
 
-        with col_left:
-            st.markdown("### 📋 EXECUTIVE SUMMARY")
-            st.markdown(
-                f"""
-                <div class='glass-card'>
-                    <h5 style='margin:0 0 10px 0; color:#a78bfa;'>Document Context</h5>
-                    <p style='margin:0; font-size:0.95rem; line-height:1.5; color:#d1d5db;'>{summary}</p>
-                </div>
-                """,
-                unsafe_allow_html=True
+    with col_left:
+        st.markdown("### 📋 EXECUTIVE SUMMARY")
+        st.markdown(
+            f"""
+            <div class='glass-card'>
+                <h5 style='margin:0 0 10px 0; color:#a78bfa;'>Document Context</h5>
+                <p style='margin:0; font-size:0.95rem; line-height:1.5; color:#d1d5db;'>{summary}</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        if not is_mock:
+            st.markdown("### 💬 ASK ABOUT THIS DOCUMENT")
+            user_question = st.text_input(
+                "Ask a question about the uploaded document:",
+                placeholder="e.g. What evacuation routes are mentioned?",
+                key="doc_question_input"
             )
-
-            if not is_mock:
-                st.markdown("### 💬 ASK ABOUT THIS DOCUMENT")
-                user_question = st.text_input(
-                    "Ask a question about the uploaded document:",
-                    placeholder="e.g. What evacuation routes are mentioned?"
-                )
-                if st.button("🔍 Query Document"):
-                    if user_question.strip():
+            if st.button("🔍 Query Document"):
+                if user_question.strip():
+                    with st.spinner("Querying document context..."):
                         try:
                             qa_response = requests.post(
                                 f"{BACKEND_URL}/document-query",
@@ -121,38 +148,41 @@ if submit_analysis:
                             )
                             if qa_response.status_code == 200:
                                 answer = qa_response.json().get("answer", "No answer returned.")
-                                st.markdown(
-                                    f"""
-                                    <div class='glass-card'>
-                                        <p style='margin:0; font-size:0.95rem; line-height:1.5; color:#d1d5db;'>{answer}</p>
-                                    </div>
-                                    """,
-                                    unsafe_allow_html=True
-                                )
+                                st.session_state.doc_answer = answer
                             else:
                                 st.error(f"Query failed: {qa_response.text}")
                         except Exception as e:
                             st.error(f"Could not reach backend: {e}")
-
-        with col_right:
-            st.markdown("### ⚠️ WARNINGS & PRECAUTIONS")
-            for warning in key_warnings:
+            
+            if "doc_answer" in st.session_state and st.session_state.doc_answer:
                 st.markdown(
                     f"""
-                    <div class='custom-alert alert-severe'>
-                        <strong>WARNING:</strong> {warning}
+                    <div class='glass-card'>
+                        <p style='margin:0; font-size:0.95rem; line-height:1.5; color:#d1d5db;'>{st.session_state.doc_answer}</p>
                     </div>
                     """,
                     unsafe_allow_html=True
                 )
 
-            st.markdown("### ⚡ REQUIRED PROCEDURES")
-            for action in recommended_actions:
-                st.markdown(
-                    f"""
-                    <div class='custom-alert alert-warning'>
-                        <strong>PROCEDURE:</strong> {action}
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
+    with col_right:
+        st.markdown("### ⚠️ WARNINGS & PRECAUTIONS")
+        for warning in key_warnings:
+            st.markdown(
+                f"""
+                <div class='custom-alert alert-severe'>
+                    <strong>WARNING:</strong> {warning}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+        st.markdown("### ⚡ REQUIRED PROCEDURES")
+        for action in recommended_actions:
+            st.markdown(
+                f"""
+                <div class='custom-alert alert-warning'>
+                    <strong>PROCEDURE:</strong> {action}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
