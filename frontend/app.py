@@ -5,6 +5,10 @@ Launches the multi-page dashboard shell and redirects to the Home page.
 """
 
 import streamlit as st
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Set page configurations as first Streamlit command
 st.set_page_config(
